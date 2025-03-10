@@ -14,6 +14,7 @@
             align-items: center;
             height: 100vh;
             margin: 0;
+            user-select: none; /* Prevent text selection */
         }
 
         .gallery {
@@ -33,8 +34,29 @@
             object-fit: cover;
             border-radius: 10px;
             box-shadow: 2px 4px 10px rgba(0, 0, 0, 0.5);
-            transition: transform 0.2s ease-out;
+            transition: transform 0.3s ease-out;
             cursor: pointer;
+            -webkit-tap-highlight-color: transparent; /* Remove highlight on tap */
+            -webkit-touch-callout: none; /* Disable iOS callout */
+            -webkit-user-select: none; /* Safari */
+            -khtml-user-select: none; /* Konqueror HTML */
+            -moz-user-select: none; /* Firefox */
+            -ms-user-select: none; /* Internet Explorer/Edge */
+            user-select: none; /* Standard */
+            outline: none; /* Remove outline */
+        }
+
+        .gallery img.selected {
+            outline: 2px solid #1E90FF;
+            outline-offset: 2px;
+        }
+
+        .selection-box {
+            position: absolute;
+            border: 1px solid #1E90FF;
+            background-color: rgba(30, 144, 255, 0.1);
+            pointer-events: none;
+            z-index: 100;
         }
     </style>
 </head>
@@ -42,26 +64,79 @@
 <div class="gallery" id="gallery"></div>
 
 <script>
+    // Store original positions of images
+    const imagePositions = [];
+    let isSelecting = false;
+    let startX = 0;
+    let startY = 0;
+    let selectionBox = null;
+
     async function loadImages() {
         try {
             const response = await fetch('/api/images');
             const images = await response.json();
             const gallery = document.getElementById('gallery');
 
-            images.forEach(image => {
+            images.forEach((image, index) => {
                 const img = document.createElement('img');
                 img.src = `/api/images/${image}`;
                 img.alt = image;
+                img.draggable = false; // Prevent default drag behavior
                 gallery.appendChild(img);
 
-                // Randomly position images like cards on a table
-                img.style.top = `${Math.random() * 60 + 10}vh`;
-                img.style.left = `${Math.random() * 60 + 10}vw`;
-                img.style.transform = `rotate(${Math.random() * 30 - 15}deg)`;
+                // Generate random position and rotation
+                const top = Math.random() * 60 + 10;
+                const left = Math.random() * 60 + 10;
+                const rotation = Math.random() * 30 - 15;
+
+                // Store the original position
+                imagePositions[index] = {
+                    top: top,
+                    left: left,
+                    rotation: rotation
+                };
+
+                // Set initial position
+                img.style.top = `${top}vh`;
+                img.style.left = `${left}vw`;
+                img.style.transform = `rotate(${rotation}deg)`;
+                img.dataset.index = index;
             });
 
-            // Add event listener for mouse movement
-            document.addEventListener('mousemove', (e) => moveImages(e, gallery));
+            // Add event listener for mouse movement with throttling
+            let lastMoveTime = 0;
+            document.addEventListener('mousemove', (e) => {
+                const now = Date.now();
+                // Throttle to reduce excessive calculations
+                if (now - lastMoveTime > 20) { // 50fps limit
+                    if (!isSelecting) {
+                        moveImages(e, gallery);
+                    } else {
+                        updateSelectionBox(e);
+                    }
+                    lastMoveTime = now;
+                }
+            });
+
+            // Add mouse down event for starting the selection rectangle
+            gallery.addEventListener('mousedown', (e) => {
+                e.preventDefault(); // Prevent default selection behavior
+                startSelection(e);
+            });
+
+            // Add mouse up event for ending the selection
+            document.addEventListener('mouseup', (e) => {
+                if (isSelecting) {
+                    e.preventDefault(); // Prevent default only when we're selecting
+                    endSelection(e);
+                }
+            });
+
+            // Prevent context menu on right-click
+            gallery.addEventListener('contextmenu', (e) => {
+                e.preventDefault();
+                return false;
+            });
         } catch (error) {
             console.error("Error fetching images:", error);
         }
@@ -73,23 +148,115 @@
         const mouseY = event.clientY - rect.top;
 
         gallery.querySelectorAll('img').forEach(img => {
+            const index = parseInt(img.dataset.index);
+            const originalPosition = imagePositions[index];
+
+            // Get the current image position relative to the viewport
             const imgRect = img.getBoundingClientRect();
-            const imgX = imgRect.left + imgRect.width / 2;
-            const imgY = imgRect.top + imgRect.height / 2;
-            const deltaX = mouseX - imgX;
-            const deltaY = mouseY - imgY;
+            const imgCenterX = imgRect.left + imgRect.width / 2;
+            const imgCenterY = imgRect.top + imgRect.height / 2;
+
+            // Calculate distance between mouse and image center
+            const deltaX = mouseX - (imgCenterX - rect.left);
+            const deltaY = mouseY - (imgCenterY - rect.top);
             const distance = Math.sqrt(deltaX * deltaX + deltaY * deltaY);
 
-            // If mouse is near the image, push it away
-            if (distance < 2000) {
+            // Repulsion force decreases with distance
+            const maxDistance = 300; // Maximum distance for repulsion effect
+
+            if (distance < maxDistance) {
+                // Calculate repulsion factor (stronger when closer)
+                const repulsionFactor = 1 - (distance / maxDistance);
+
+                // Calculate angle from mouse to image
                 const angle = Math.atan2(deltaY, deltaX);
-                const moveX = Math.cos(angle) * 30;
-                const moveY = Math.sin(angle) * 30;
-                img.style.transform = `translate(${moveX}px, ${moveY}px)`; //rotate(${Math.random() * 10 - 5}deg
+
+                // Calculate repulsion amount
+                const repulsionX = -Math.cos(angle) * 40 * repulsionFactor;
+                const repulsionY = -Math.sin(angle) * 40 * repulsionFactor;
+
+                // Apply smooth combined transform
+                img.style.transform = `translate(${repulsionX}px, ${repulsionY}px) rotate(${originalPosition.rotation}deg)`;
             } else {
-                img.style.transform = `rotate(${Math.random() * 30 - 15}deg)`;
+                // Return to original position and rotation
+                img.style.transform = `rotate(${originalPosition.rotation}deg)`;
             }
         });
+    }
+
+    function startSelection(event) {
+        isSelecting = true;
+
+        // Get mouse coordinates relative to the gallery
+        const rect = document.getElementById('gallery').getBoundingClientRect();
+        startX = event.clientX - rect.left;
+        startY = event.clientY - rect.top;
+
+        // Create selection box
+        selectionBox = document.createElement('div');
+        selectionBox.classList.add('selection-box');
+        selectionBox.style.left = `${startX}px`;
+        selectionBox.style.top = `${startY}px`;
+        selectionBox.style.width = '0px';
+        selectionBox.style.height = '0px';
+
+        // Add to gallery
+        document.getElementById('gallery').appendChild(selectionBox);
+
+        // Clear any previous selections
+        document.querySelectorAll('.gallery img.selected').forEach(img => {
+            img.classList.remove('selected');
+        });
+    }
+
+    function updateSelectionBox(event) {
+        if (!isSelecting || !selectionBox) return;
+
+        // Get current mouse position
+        const rect = document.getElementById('gallery').getBoundingClientRect();
+        const currentX = event.clientX - rect.left;
+        const currentY = event.clientY - rect.top;
+
+        // Calculate the dimensions and position
+        const width = Math.abs(currentX - startX);
+        const height = Math.abs(currentY - startY);
+        const left = Math.min(startX, currentX);
+        const top = Math.min(startY, currentY);
+
+        // Update the selection box
+        selectionBox.style.width = `${width}px`;
+        selectionBox.style.height = `${height}px`;
+        selectionBox.style.left = `${left}px`;
+        selectionBox.style.top = `${top}px`;
+    }
+
+    function endSelection(event) {
+        if (!isSelecting) return;
+
+        isSelecting = false;
+
+        // Get the final selection box dimensions
+        const selectionRect = selectionBox.getBoundingClientRect();
+        const galleryRect = document.getElementById('gallery').getBoundingClientRect();
+
+        // Check which images are within the selection box
+        document.querySelectorAll('.gallery img').forEach(img => {
+            const imgRect = img.getBoundingClientRect();
+
+            // Check if the image intersects with the selection box
+            if (!(imgRect.right < selectionRect.left ||
+                imgRect.left > selectionRect.right ||
+                imgRect.bottom < selectionRect.top ||
+                imgRect.top > selectionRect.bottom)) {
+                img.classList.add('selected');
+            }
+        });
+
+        // Remove the selection box
+        if (selectionBox && selectionBox.parentNode) {
+            selectionBox.parentNode.removeChild(selectionBox);
+        }
+        selectionBox = null;
     }
 
     loadImages();
