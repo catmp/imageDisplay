@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Interactive Image Wall</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background-color: #222;
+            overflow: hidden;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            margin: 0;
+        }
+
+        .gallery {
+            position: relative;
+            width: 80vw;
+            height: 80vh;
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: center;
+            align-items: center;
+        }
+
+        .gallery img {
+            position: absolute;
+            width: 150px;
+            height: 150px;
+            object-fit: cover;
+            border-radius: 10px;
+            box-shadow: 2px 4px 10px rgba(0, 0, 0, 0.5);
+            transition: transform 0.2s ease-out;
+            cursor: pointer;
+        }
+    </style>
+</head>
+<body>
+<div class="gallery" id="gallery"></div>
+
+<script>
+    async function loadImages() {
+        try {
+            const response = await fetch('/api/images');
+            const images = await response.json();
+            const gallery = document.getElementById('gallery');
+
+            images.forEach(image => {
+                const img = document.createElement('img');
+                img.src = `/api/images/${image}`;
+                img.alt = image;
+                gallery.appendChild(img);
+
+                // Randomly position images like cards on a table
+                img.style.top = `${Math.random() * 60 + 10}vh`;
+                img.style.left = `${Math.random() * 60 + 10}vw`;
+                img.style.transform = `rotate(${Math.random() * 30 - 15}deg)`;
+            });
+
+            // Add event listener for mouse movement
+            document.addEventListener('mousemove', (e) => moveImages(e, gallery));
+        } catch (error) {
+            console.error("Error fetching images:", error);
+        }
+    }
+
+    function moveImages(event, gallery) {
+        const rect = gallery.getBoundingClientRect();
+        const mouseX = event.clientX - rect.left;
+        const mouseY = event.clientY - rect.top;
+
+        gallery.querySelectorAll('img').forEach(img => {
+            const imgRect = img.getBoundingClientRect();
+            const imgX = imgRect.left + imgRect.width / 2;
+            const imgY = imgRect.top + imgRect.height / 2;
+            const deltaX = mouseX - imgX;
+            const deltaY = mouseY - imgY;
+            const distance = Math.sqrt(deltaX * deltaX + deltaY * deltaY);
+
+            // If mouse is near the image, push it away
+            if (distance < 1000) {
+                const angle = Math.atan2(deltaY, deltaX);
+                const moveX = Math.cos(angle) * 30;
+                const moveY = Math.sin(angle) * 30;
+                img.style.transform = `translate(${moveX}px, ${moveY}px) rotate(${Math.random() * 10 - 5}deg)`;
+            } else {
+                img.style.transform = `rotate(${Math.random() * 30 - 15}deg)`;
+            }
+        });
+    }
+
+    loadImages();
+</script>
+</body>
+</html>
