@@ -67,9 +67,13 @@
     // Store original positions of images
     const imagePositions = [];
     let isSelecting = false;
+    let isDragging = false;
     let startX = 0;
     let startY = 0;
+    let lastMouseX = 0;
+    let lastMouseY = 0;
     let selectionBox = null;
+    let selectedImageOffsets = [];
 
     async function loadImages() {
         try {
@@ -107,28 +111,39 @@
             let lastMoveTime = 0;
             document.addEventListener('mousemove', (e) => {
                 const now = Date.now();
+                // Store current mouse position
+                lastMouseX = e.clientX;
+                lastMouseY = e.clientY;
+
                 // Throttle to reduce excessive calculations
                 if (now - lastMoveTime > 20) { // 50fps limit
-                    if (!isSelecting) {
-                        moveImages(e, gallery);
-                    } else {
+                    if (isDragging) {
+                        dragSelectedImages(e);
+                    } else if (isSelecting) {
                         updateSelectionBox(e);
+                    } else {
+                        moveImages(e, gallery);
                     }
                     lastMoveTime = now;
                 }
             });
 
-            // Add mouse down event for starting the selection rectangle
+            // Add mouse down event for starting the selection rectangle or dragging
             gallery.addEventListener('mousedown', (e) => {
                 e.preventDefault(); // Prevent default selection behavior
-                startSelection(e);
+                handleMouseDown(e);
             });
 
-            // Add mouse up event for ending the selection
+            // Add mouse up event for ending the selection or dragging
             document.addEventListener('mouseup', (e) => {
-                if (isSelecting) {
-                    e.preventDefault(); // Prevent default only when we're selecting
-                    endSelection(e);
+                if (isSelecting || isDragging) {
+                    e.preventDefault();
+
+                    if (isSelecting) {
+                        endSelection(e);
+                    } else if (isDragging) {
+                        endDrag(e);
+                    }
                 }
             });
 
@@ -147,7 +162,7 @@
         const mouseX = event.clientX - rect.left;
         const mouseY = event.clientY - rect.top;
 
-        gallery.querySelectorAll('img').forEach(img => {
+        gallery.querySelectorAll('img:not(.selected)').forEach(img => {
             const index = parseInt(img.dataset.index);
             const originalPosition = imagePositions[index];
 
@@ -184,37 +199,116 @@
         });
     }
 
-    function startSelection(event) {
-        // Check if the click is on an image
-        const target = event.target;
-        if (target.tagName === 'IMG') {
-            // If clicking on an image, toggle its selection without starting a rectangle
-            target.classList.toggle('selected');
-            return; // Exit early without starting rectangle selection
-        }
-
-        isSelecting = true;
-
+    function handleMouseDown(event) {
         // Get mouse coordinates relative to the gallery
         const rect = document.getElementById('gallery').getBoundingClientRect();
         startX = event.clientX - rect.left;
         startY = event.clientY - rect.top;
 
-        // Create selection box
-        selectionBox = document.createElement('div');
-        selectionBox.classList.add('selection-box');
-        selectionBox.style.left = `${startX}px`;
-        selectionBox.style.top = `${startY}px`;
-        selectionBox.style.width = '0px';
-        selectionBox.style.height = '0px';
+        // Check if the click is on an image
+        const target = event.target;
 
-        // Add to gallery
-        document.getElementById('gallery').appendChild(selectionBox);
+        if (target.tagName === 'IMG') {
+            // If the clicked image is already selected, start dragging all selected images
+            if (target.classList.contains('selected')) {
+                startDragging(event);
+            } else {
+                // If not holding shift, clear previous selections
+                if (!event.shiftKey) {
+                    document.querySelectorAll('.gallery img.selected').forEach(img => {
+                        img.classList.remove('selected');
+                    });
+                }
 
-        // Clear any previous selections
-        document.querySelectorAll('.gallery img.selected').forEach(img => {
-            img.classList.remove('selected');
+                // Toggle selection on the clicked image
+                target.classList.toggle('selected');
+            }
+        } else {
+            // If clicking on empty space, start selection rectangle
+            isSelecting = true;
+
+            // Create selection box
+            selectionBox = document.createElement('div');
+            selectionBox.classList.add('selection-box');
+            selectionBox.style.left = `${startX}px`;
+            selectionBox.style.top = `${startY}px`;
+            selectionBox.style.width = '0px';
+            selectionBox.style.height = '0px';
+
+            // Add to gallery
+            document.getElementById('gallery').appendChild(selectionBox);
+
+            // Clear any previous selections if not holding shift
+            if (!event.shiftKey) {
+                document.querySelectorAll('.gallery img.selected').forEach(img => {
+                    img.classList.remove('selected');
+                });
+            }
+        }
+    }
+
+    function startDragging(event) {
+        isDragging = true;
+        selectedImageOffsets = [];
+
+        // Calculate the offsets for each selected image
+        const selectedImages = document.querySelectorAll('.gallery img.selected');
+        selectedImages.forEach(img => {
+            const imgRect = img.getBoundingClientRect();
+            selectedImageOffsets.push({
+                element: img,
+                offsetX: event.clientX - imgRect.left,
+                offsetY: event.clientY - imgRect.top
+            });
         });
+    }
+
+    function dragSelectedImages(event) {
+        if (!isDragging) return;
+
+        const gallery = document.getElementById('gallery');
+        const galleryRect = gallery.getBoundingClientRect();
+
+        // Move each selected image
+        selectedImageOffsets.forEach(item => {
+            const newLeft = (event.clientX - item.offsetX - galleryRect.left) / galleryRect.width * 100;
+            const newTop = (event.clientY - item.offsetY - galleryRect.top) / galleryRect.height * 100;
+
+            item.element.style.left = `${newLeft}vw`;
+            item.element.style.top = `${newTop}vh`;
+
+            // Keep the rotation
+            const index = parseInt(item.element.dataset.index);
+            const rotation = imagePositions[index].rotation;
+            item.element.style.transform = `rotate(${rotation}deg)`;
+        });
+    }
+
+    function endDrag(event) {
+        if (!isDragging) return;
+
+        isDragging = false;
+
+        // Update the stored positions for each moved image
+        const gallery = document.getElementById('gallery');
+        const galleryRect = gallery.getBoundingClientRect();
+
+        selectedImageOffsets.forEach(item => {
+            const index = parseInt(item.element.dataset.index);
+            const computedStyle = window.getComputedStyle(item.element);
+
+            // Extract the top and left values (removing 'vh' and 'vw')
+            const topValue = parseFloat(computedStyle.top);
+            const leftValue = parseFloat(computedStyle.left);
+
+            // Update the stored positions
+            if (!isNaN(topValue) && !isNaN(leftValue)) {
+                imagePositions[index].top = topValue;
+                imagePositions[index].left = leftValue;
+            }
+        });
+
+        selectedImageOffsets = [];
     }
 
     function updateSelectionBox(event) {
