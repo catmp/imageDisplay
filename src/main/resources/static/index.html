@@ -47,14 +47,14 @@
         }
 
         .gallery img.selected {
-            outline: 2px solid #1E90FF;
+            outline: 2px solid white;  /* Changed from #1E90FF to white */
             outline-offset: 2px;
         }
 
         .selection-box {
             position: absolute;
-            border: 1px solid #1E90FF;
-            background-color: rgba(30, 144, 255, 0.1);
+            border: 1px solid white;  /* Changed from #1E90FF to white */
+            background-color: rgba(255, 255, 255, 0.1);  /* Changed from blue to white */
             pointer-events: none;
             z-index: 100;
         }
@@ -185,6 +185,14 @@
     }
 
     function startSelection(event) {
+        // Check if the click is on an image
+        const target = event.target;
+        if (target.tagName === 'IMG') {
+            // If clicking on an image, toggle its selection without starting a rectangle
+            target.classList.toggle('selected');
+            return; // Exit early without starting rectangle selection
+        }
+
         isSelecting = true;
 
         // Get mouse coordinates relative to the gallery
