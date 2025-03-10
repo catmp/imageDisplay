@@ -81,11 +81,11 @@
             const distance = Math.sqrt(deltaX * deltaX + deltaY * deltaY);
 
             // If mouse is near the image, push it away
-            if (distance < 1000) {
+            if (distance < 2000) {
                 const angle = Math.atan2(deltaY, deltaX);
                 const moveX = Math.cos(angle) * 30;
                 const moveY = Math.sin(angle) * 30;
-                img.style.transform = `translate(${moveX}px, ${moveY}px) rotate(${Math.random() * 10 - 5}deg)`;
+                img.style.transform = `translate(${moveX}px, ${moveY}px)`; //rotate(${Math.random() * 10 - 5}deg
             } else {
                 img.style.transform = `rotate(${Math.random() * 30 - 15}deg)`;
             }
