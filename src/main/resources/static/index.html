@@ -44,17 +44,23 @@
             -ms-user-select: none; /* Internet Explorer/Edge */
             user-select: none; /* Standard */
             outline: none; /* Remove outline */
+            z-index: 1; /* Base z-index */
         }
 
         .gallery img.selected {
-            outline: 2px solid white;  /* Changed from #1E90FF to white */
+            outline: 2px solid white;
             outline-offset: 2px;
+        }
+
+        .gallery img.dragging {
+            z-index: 10; /* Higher z-index when dragging */
+            transition: none; /* Remove transition for smoother dragging */
         }
 
         .selection-box {
             position: absolute;
-            border: 1px solid white;  /* Changed from #1E90FF to white */
-            background-color: rgba(255, 255, 255, 0.1);  /* Changed from blue to white */
+            border: 1px solid white;
+            background-color: rgba(255, 255, 255, 0.1);
             pointer-events: none;
             z-index: 100;
         }
@@ -64,8 +70,9 @@
 <div class="gallery" id="gallery"></div>
 
 <script>
-    // Store original positions of images
+    // Store original and current positions of images
     const imagePositions = [];
+    const currentPositions = [];
     let isSelecting = false;
     let isDragging = false;
     let startX = 0;
@@ -74,6 +81,7 @@
     let lastMouseY = 0;
     let selectionBox = null;
     let selectedImageOffsets = [];
+    let highestZIndex = 10;
 
     async function loadImages() {
         try {
@@ -100,11 +108,19 @@
                     rotation: rotation
                 };
 
+                // Store current position (will be updated when dragged)
+                currentPositions[index] = {
+                    top: top,
+                    left: left,
+                    rotation: rotation
+                };
+
                 // Set initial position
                 img.style.top = `${top}vh`;
                 img.style.left = `${left}vw`;
                 img.style.transform = `rotate(${rotation}deg)`;
                 img.dataset.index = index;
+                img.style.zIndex = 1; // Initial z-index
             });
 
             // Add event listener for mouse movement with throttling
@@ -164,7 +180,7 @@
 
         gallery.querySelectorAll('img:not(.selected)').forEach(img => {
             const index = parseInt(img.dataset.index);
-            const originalPosition = imagePositions[index];
+            const currentPosition = currentPositions[index];
 
             // Get the current image position relative to the viewport
             const imgRect = img.getBoundingClientRect();
@@ -191,10 +207,10 @@
                 const repulsionY = -Math.sin(angle) * 40 * repulsionFactor;
 
                 // Apply smooth combined transform
-                img.style.transform = `translate(${repulsionX}px, ${repulsionY}px) rotate(${originalPosition.rotation}deg)`;
+                img.style.transform = `translate(${repulsionX}px, ${repulsionY}px) rotate(${currentPosition.rotation}deg)`;
             } else {
                 // Return to original position and rotation
-                img.style.transform = `rotate(${originalPosition.rotation}deg)`;
+                img.style.transform = `rotate(${currentPosition.rotation}deg)`;
             }
         });
     }
@@ -251,15 +267,37 @@
         isDragging = true;
         selectedImageOffsets = [];
 
-        // Calculate the offsets for each selected image
+        // Increment the highest z-index
+        highestZIndex += 1;
+
+        // Calculate the offsets for each selected image and increase z-index
         const selectedImages = document.querySelectorAll('.gallery img.selected');
         selectedImages.forEach(img => {
-            const imgRect = img.getBoundingClientRect();
+            const rect = document.getElementById('gallery').getBoundingClientRect();
+            const index = parseInt(img.dataset.index);
+
+            // Get the current position in vh/vw
+            const currentTop = currentPositions[index].top;
+            const currentLeft = currentPositions[index].left;
+
+            // Convert to pixels for precise calculations
+            const topPx = (currentTop / 100) * rect.height;
+            const leftPx = (currentLeft / 100) * rect.width;
+
+            // Calculate offset from mouse to the top-left corner of each image
+            const offsetX = startX - leftPx;
+            const offsetY = startY - topPx;
+
+            // Store the offset and element
             selectedImageOffsets.push({
                 element: img,
-                offsetX: event.clientX - imgRect.left,
-                offsetY: event.clientY - imgRect.top
+                offsetX: offsetX,
+                offsetY: offsetY
             });
+
+            // Add dragging class and increase z-index
+            img.classList.add('dragging');
+            img.style.zIndex = highestZIndex;
         });
     }
 
@@ -269,17 +307,27 @@
         const gallery = document.getElementById('gallery');
         const galleryRect = gallery.getBoundingClientRect();
 
+        // Get current mouse position relative to gallery
+        const currentX = event.clientX - galleryRect.left;
+        const currentY = event.clientY - galleryRect.top;
+
         // Move each selected image
         selectedImageOffsets.forEach(item => {
-            const newLeft = (event.clientX - item.offsetX - galleryRect.left) / galleryRect.width * 100;
-            const newTop = (event.clientY - item.offsetY - galleryRect.top) / galleryRect.height * 100;
+            // Calculate new position (pixel position - offset)
+            const newLeftPx = currentX - item.offsetX;
+            const newTopPx = currentY - item.offsetY;
 
+            // Convert to vh/vw
+            const newLeft = (newLeftPx / galleryRect.width) * 100;
+            const newTop = (newTopPx / galleryRect.height) * 100;
+
+            // Apply new position
             item.element.style.left = `${newLeft}vw`;
             item.element.style.top = `${newTop}vh`;
 
             // Keep the rotation
             const index = parseInt(item.element.dataset.index);
-            const rotation = imagePositions[index].rotation;
+            const rotation = currentPositions[index].rotation;
             item.element.style.transform = `rotate(${rotation}deg)`;
         });
     }
@@ -290,22 +338,39 @@
         isDragging = false;
 
         // Update the stored positions for each moved image
-        const gallery = document.getElementById('gallery');
-        const galleryRect = gallery.getBoundingClientRect();
-
         selectedImageOffsets.forEach(item => {
             const index = parseInt(item.element.dataset.index);
             const computedStyle = window.getComputedStyle(item.element);
 
-            // Extract the top and left values (removing 'vh' and 'vw')
-            const topValue = parseFloat(computedStyle.top);
-            const leftValue = parseFloat(computedStyle.left);
+            // Extract the top and left values
+            let topValue = parseFloat(computedStyle.top);
+            let leftValue = parseFloat(computedStyle.left);
 
-            // Update the stored positions
-            if (!isNaN(topValue) && !isNaN(leftValue)) {
-                imagePositions[index].top = topValue;
-                imagePositions[index].left = leftValue;
+            // Handle different units
+            if (computedStyle.top.endsWith('vh')) {
+                topValue = parseFloat(computedStyle.top);
+            } else {
+                // Convert px to vh if needed
+                const galleryRect = document.getElementById('gallery').getBoundingClientRect();
+                topValue = (parseFloat(computedStyle.top) / galleryRect.height) * 100;
             }
+
+            if (computedStyle.left.endsWith('vw')) {
+                leftValue = parseFloat(computedStyle.left);
+            } else {
+                // Convert px to vw if needed
+                const galleryRect = document.getElementById('gallery').getBoundingClientRect();
+                leftValue = (parseFloat(computedStyle.left) / galleryRect.width) * 100;
+            }
+
+            // Update the stored current positions
+            if (!isNaN(topValue) && !isNaN(leftValue)) {
+                currentPositions[index].top = topValue;
+                currentPositions[index].left = leftValue;
+            }
+
+            // Remove dragging class but keep the z-index
+            item.element.classList.remove('dragging');
         });
 
         selectedImageOffsets = [];
